@@ -3,4 +3,10 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+.Python
+*.sqlite3
+*.db
+*.log
+.env
+.env.*
 chat_app/chat.db
