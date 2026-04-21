@@ -18,14 +18,31 @@ _LOCAL_SERVER = None
 _LOCAL_SERVER_LOCK = threading.Lock()
 
 
-def ensure_local_server() -> tuple[bool, str]:
+def get_default_server_name() -> str:
+    """Return a friendly default server name for the current PC."""
+
+    return socket.gethostname() or "Local Chat"
+
+
+def ensure_local_server(server_name: str, server_password: str) -> tuple[bool, str]:
     """Start the local server once and reuse it across logins."""
 
     global _LOCAL_SERVER
     with _LOCAL_SERVER_LOCK:
         if _LOCAL_SERVER and _LOCAL_SERVER.is_running:
+            if (
+                _LOCAL_SERVER.server_name != (server_name.strip() or "Local Chat")
+                or _LOCAL_SERVER.server_password != server_password
+            ):
+                return (
+                    False,
+                    "This app is already hosting a server with different server details.",
+                )
             return True, ""
-        _LOCAL_SERVER = Server()
+        _LOCAL_SERVER = Server(
+            server_name=server_name,
+            server_password=server_password,
+        )
         if _LOCAL_SERVER.start():
             return True, ""
         return False, _LOCAL_SERVER.last_error or "Server failed to start."
@@ -56,7 +73,8 @@ class LoginWindow(BaseWindow):
         self._user_var = tk.StringVar()
         self._pw_var = tk.StringVar()
         self._pw2_var = tk.StringVar()
-        self._host_var = tk.StringVar(value=Config.DEFAULT_SERVER_HOST)
+        self._server_name_var = tk.StringVar()
+        self._server_password_var = tk.StringVar()
         self._host_local_var = tk.BooleanVar(value=False)
         self._status_lbl = None
         self._server_lbl = None
@@ -70,6 +88,7 @@ class LoginWindow(BaseWindow):
         self._si = 0
         super().__init__(root, "Chat - Sign In", 420, 680, resizable=False)
         root.bind("<Return>", lambda _: self._submit())
+        self._server_name_var.trace_add("write", lambda *_: self._refresh_host_details())
 
     def _build(self):
         hero = tk.Frame(self.root, bg=Theme.BG_DARK)
@@ -163,7 +182,8 @@ class LoginWindow(BaseWindow):
             lambda _: pw2_wrap.config(highlightbackground=Theme.BORDER),
         )
 
-        self._mk_field(inner, "Server Address", self._host_var, show=None)
+        self._mk_field(inner, "Server Name", self._server_name_var, show=None)
+        self._mk_field(inner, "Server Password", self._server_password_var, show="*")
 
         tk.Checkbutton(
             inner,
@@ -309,17 +329,20 @@ class LoginWindow(BaseWindow):
         if not self._server_lbl:
             return
         if self._host_local_var.get():
+            if not self._server_name_var.get().strip():
+                self._server_name_var.set(get_default_server_name())
             local_ip = get_local_ip()
             self._server_lbl.config(
                 text=(
                     f"This PC will host on port {Config.PORT}.\n"
-                    f"Other PCs can join using: {local_ip}:{Config.PORT}"
+                    f"Server name: {self._server_name_var.get().strip() or get_default_server_name()}\n"
+                    f"Other PCs can join using this PC name or IP: {local_ip}"
                 ),
                 fg=Theme.ACCENT,
             )
         else:
             self._server_lbl.config(
-                text="Enter the host PC IP address to join the shared chat.",
+                text="Enter the host PC name or IP, plus the shared server password.",
                 fg=Theme.MUTED,
             )
 
@@ -327,8 +350,11 @@ class LoginWindow(BaseWindow):
         user = self._user_var.get().strip()
         password = self._pw_var.get()
         mode = self._mode.get()
-        requested_host = self._host_var.get().strip() or Config.DEFAULT_SERVER_HOST
-        connect_host = Config.DEFAULT_SERVER_HOST if self._host_local_var.get() else requested_host
+        server_name = self._server_name_var.get().strip() or get_default_server_name()
+        server_password = self._server_password_var.get()
+        connect_host = (
+            Config.DEFAULT_SERVER_HOST if self._host_local_var.get() else server_name
+        )
 
         if not user or not password:
             self._set_status("Please fill in all fields.", Theme.DANGER)
@@ -346,7 +372,7 @@ class LoginWindow(BaseWindow):
             time.sleep(0.2)
 
             if self._host_local_var.get():
-                ok, reason = ensure_local_server()
+                ok, reason = ensure_local_server(server_name, server_password)
                 if not ok:
                     self.root.after(0, lambda r=reason: self._fail(r))
                     return
@@ -365,7 +391,12 @@ class LoginWindow(BaseWindow):
             client = Client(user, on_msg=on_msg, on_err=on_err)
             client._buf_q = buf_q
 
-            if not client.connect(mode, password, host=connect_host):
+            if not client.connect(
+                mode,
+                password,
+                host=connect_host,
+                server_password=server_password,
+            ):
                 self.root.after(
                     0,
                     lambda: self._fail(

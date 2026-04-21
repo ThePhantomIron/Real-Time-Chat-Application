@@ -21,9 +21,13 @@ class Server:
         self,
         host: str = Config.SERVER_BIND_HOST,
         port: int = Config.PORT,
+        server_name: str = "Local Chat",
+        server_password: str = "",
     ):
         self.host = host
         self.port = port
+        self.server_name = server_name.strip() or "Local Chat"
+        self.server_password = server_password
         self.last_error = ""
         self._clients: dict[socket.socket, str] = {}
         self._lock = threading.Lock()
@@ -90,6 +94,12 @@ class Server:
             mode = data.get("mode", "login")
             user = data.get("username", "").strip()
             pw = data.get("password", "")
+            supplied_server_password = data.get("server_password", "")
+
+            if supplied_server_password != self.server_password:
+                conn.sendall(MF.pack(MF.auth_fail("Incorrect server password.")))
+                conn.close()
+                return
 
             if mode == "register":
                 ok, msg = DB.register(user, pw)

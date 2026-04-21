@@ -48,7 +48,7 @@ python chat_app/main.py
 
 1. On the host PC, run the app and enable `Host chat on this PC`.
 2. Note the IP address shown on the login screen.
-3. On every other PC, run the app and enter that host IP in `Server Address`.
+3. On every other PC, run the app and enter that host PC name or IP in `Server Name`, plus the shared `Server Password`.
 4. Log in or register on the shared host.
 
 You can also run only the server on the host PC:

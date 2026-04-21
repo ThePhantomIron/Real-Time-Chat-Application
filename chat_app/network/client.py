@@ -43,6 +43,7 @@ class Client:
         password: str,
         host: str | None = None,
         port: int | None = None,
+        server_password: str = "",
     ) -> bool:
         self.server_host = (host or Config.DEFAULT_SERVER_HOST).strip()
         self.server_port = port or Config.PORT
@@ -51,7 +52,12 @@ class Client:
             self._sock.connect((self.server_host, self.server_port))
             self._sock.sendall(
                 json.dumps(
-                    {"mode": mode, "username": self.username, "password": password}
+                    {
+                        "mode": mode,
+                        "username": self.username,
+                        "password": password,
+                        "server_password": server_password,
+                    }
                 ).encode()
             )
             self.connected = True
