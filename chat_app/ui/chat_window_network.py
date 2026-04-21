@@ -18,6 +18,7 @@ class ChatWindow(BaseWindow):
         self._session = session
         self._client = client
         self._on_logout = on_logout
+        self._closing = False
         self._cm = None
         self._sidebar = None
         self._canvas = None
@@ -31,9 +32,8 @@ class ChatWindow(BaseWindow):
         self._pending = []
         self._cm_ready = False
 
-        client._on_msg = lambda m: root.after(0, lambda msg=m: self._handle(msg))
-        client._on_err = lambda _: root.after(
-            0,
+        client._on_msg = lambda m: self._queue_ui(lambda msg=m: self._handle(msg))
+        client._on_err = lambda _: self._queue_ui(
             lambda: self._status("Disconnected", Theme.DANGER),
         )
 
@@ -42,7 +42,7 @@ class ChatWindow(BaseWindow):
             while not buf_q.empty():
                 try:
                     msg = buf_q.get_nowait()
-                    root.after(0, lambda queued=msg: self._handle(queued))
+                    self._queue_ui(lambda queued=msg: self._handle(queued))
                 except Exception:
                     break
 
@@ -511,14 +511,42 @@ class ChatWindow(BaseWindow):
             return
         self._client.send_dm_delete(msg_id, peer)
 
+    def _queue_ui(self, callback):
+        if self._closing:
+            return
+        try:
+            if self.root.winfo_exists():
+                self.root.after(0, callback)
+        except tk.TclError:
+            pass
+
+    def _widget_exists(self, widget) -> bool:
+        if widget is None:
+            return False
+        try:
+            return bool(widget.winfo_exists())
+        except tk.TclError:
+            return False
+
     def _status(self, text: str, color: str):
-        if self._dot:
+        if self._closing:
+            return
+        if self._widget_exists(self._dot) and self._widget_exists(self._connlbl):
             self._dot.config(fg=color)
             self._connlbl.config(text=text, fg=color)
+
+    def _prepare_shutdown(self):
+        if self._closing:
+            return
+        self._closing = True
+        if self._client:
+            self._client._on_msg = lambda *_args, **_kwargs: None
+            self._client._on_err = lambda *_args, **_kwargs: None
 
     def _logout(self):
         if not messagebox.askyesno("Logout", "Log out and return to the sign-in screen?"):
             return
+        self._prepare_shutdown()
         if self._client:
             self._client.disconnect()
         if callable(self._on_logout):
@@ -527,6 +555,7 @@ class ChatWindow(BaseWindow):
             self.root.destroy()
 
     def _close(self):
+        self._prepare_shutdown()
         if self._client:
             self._client.disconnect()
         self.root.destroy()
