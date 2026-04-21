@@ -379,14 +379,18 @@ class LoginWindow(BaseWindow):
 
             auth_q = queue.Queue()
             buf_q = queue.Queue()
+            init_q = queue.Queue()
 
             def on_msg(msg):
                 buf_q.put(msg)
                 if msg.get("type") in ("auth_ok", "auth_fail"):
                     auth_q.put(msg)
+                if msg.get("type") == "channels":
+                    init_q.put(msg)
 
             def on_err(err):
                 auth_q.put({"type": "auth_fail", "reason": str(err)})
+                init_q.put({"type": "disconnect", "reason": str(err)})
 
             client = Client(user, on_msg=on_msg, on_err=on_err)
             client._buf_q = buf_q
@@ -413,6 +417,27 @@ class LoginWindow(BaseWindow):
                 return
 
             if msg.get("type") == "auth_ok":
+                try:
+                    init_msg = init_q.get(timeout=6)
+                except Exception:
+                    client.disconnect()
+                    self.root.after(
+                        0,
+                        lambda: self._fail("Server did not send initial chat state."),
+                    )
+                    return
+
+                if init_msg.get("type") == "disconnect":
+                    client.disconnect()
+                    self.root.after(
+                        0,
+                        lambda r=init_msg.get(
+                            "reason",
+                            "Disconnected before chat state loaded.",
+                        ): self._fail(r),
+                    )
+                    return
+
                 canonical = msg["username"]
                 self.root.after(
                     0,

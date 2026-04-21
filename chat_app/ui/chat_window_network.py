@@ -29,12 +29,13 @@ class ChatWindow(BaseWindow):
         self._connlbl = None
         self._chlbl = None
         self._dm_badge = None
+        self._init_job = None
         self._pending = []
         self._cm_ready = False
 
         client._on_msg = lambda m: self._queue_ui(lambda msg=m: self._handle(msg))
         client._on_err = lambda _: self._queue_ui(
-            lambda: self._status("Disconnected", Theme.DANGER),
+            lambda: self._handle_disconnect(),
         )
 
         buf_q = getattr(client, "_buf_q", None)
@@ -66,8 +67,10 @@ class ChatWindow(BaseWindow):
             f"Connected to {self._client.server_host}:{self._client.server_port}",
             Theme.ONLINE,
         )
+        self._init_job = self.root.after(6000, self._initial_state_timeout)
 
     def _finish_build(self, channels: list[str]):
+        self._cancel_init_timeout()
         self._cm = ChannelMgr(channels)
         self._loading.destroy()
 
@@ -511,6 +514,34 @@ class ChatWindow(BaseWindow):
             return
         self._client.send_dm_delete(msg_id, peer)
 
+    def _cancel_init_timeout(self):
+        if self._init_job is not None:
+            try:
+                self.root.after_cancel(self._init_job)
+            except tk.TclError:
+                pass
+            self._init_job = None
+
+    def _initial_state_timeout(self):
+        self._init_job = None
+        if self._cm_ready or self._closing:
+            return
+        self._initial_state_failed("Server did not finish loading chat history.")
+
+    def _initial_state_failed(self, reason: str):
+        if self._closing:
+            return
+        self._cancel_init_timeout()
+        if self._widget_exists(self._loading):
+            self._loading.config(text=reason, fg=Theme.DANGER)
+        self._status("Disconnected", Theme.DANGER)
+
+    def _handle_disconnect(self):
+        if not self._cm_ready:
+            self._initial_state_failed("Disconnected before initial chat state loaded.")
+            return
+        self._status("Disconnected", Theme.DANGER)
+
     def _queue_ui(self, callback):
         if self._closing:
             return
@@ -539,6 +570,7 @@ class ChatWindow(BaseWindow):
         if self._closing:
             return
         self._closing = True
+        self._cancel_init_timeout()
         if self._client:
             self._client._on_msg = lambda *_args, **_kwargs: None
             self._client._on_err = lambda *_args, **_kwargs: None
