@@ -10,3 +10,5 @@ __pycache__/
 .env
 .env.*
 chat_app/chat.db
+chat_app/chat.db-shm
+chat_app/chat.db-wal

@@ -6,9 +6,9 @@ import json
 import socket
 import threading
 
-from .core.config   import Config
+from .core.config import Config
 from .core.database import DB
-from .network.protocol       import MF
+from .network.protocol import MF
 
 
 class Server:
@@ -17,11 +17,22 @@ class Server:
     Each connected client runs in its own daemon thread.
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        host: str = Config.SERVER_BIND_HOST,
+        port: int = Config.PORT,
+    ):
+        self.host = host
+        self.port = port
+        self.last_error = ""
         self._clients: dict[socket.socket, str] = {}
-        self._lock  = threading.Lock()
-        self._sock  = None
-        self._up    = False
+        self._lock = threading.Lock()
+        self._sock = None
+        self._up = False
+
+    @property
+    def is_running(self) -> bool:
+        return self._up
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -30,12 +41,14 @@ class Server:
         try:
             self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self._sock.bind((Config.HOST, Config.PORT))
+            self._sock.bind((self.host, self.port))
             self._sock.listen(20)
             self._up = True
+            self.last_error = ""
             threading.Thread(target=self._accept_loop, daemon=True).start()
             return True
-        except Exception:
+        except Exception as exc:
+            self.last_error = str(exc)
             return False
 
     def stop(self):
@@ -72,11 +85,11 @@ class Server:
         name = "?"
         try:
             # ── Auth handshake ──────────────────────────────────────────────
-            raw  = conn.recv(Config.BUFFER).decode()
+            raw = conn.recv(Config.BUFFER).decode()
             data = json.loads(raw.strip())
             mode = data.get("mode", "login")
             user = data.get("username", "").strip()
-            pw   = data.get("password", "")
+            pw = data.get("password", "")
 
             if mode == "register":
                 ok, msg = DB.register(user, pw)
@@ -211,7 +224,7 @@ class Server:
 
     def _broadcast(self, data: dict):
         payload = MF.pack(data)
-        dead    = []
+        dead = []
         with self._lock:
             targets = list(self._clients)
         for s in targets:
@@ -228,3 +241,15 @@ class Server:
         with self._lock:
             users = list(self._clients.values())
         self._broadcast(MF.users(users))
+
+
+if __name__ == "__main__":
+    server = Server()
+    if not server.start():
+        raise SystemExit(f"Server failed to start: {server.last_error or 'unknown error'}")
+    print(f"Server listening on 0.0.0.0:{server.port}")
+    try:
+        while True:
+            threading.Event().wait(3600)
+    except KeyboardInterrupt:
+        server.stop()

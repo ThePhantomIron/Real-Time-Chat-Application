@@ -7,11 +7,11 @@ LoginWindow and ChatWindow.
 
 import tkinter as tk
 
-from .core.config    import Theme
-from .core.models    import UserSession
+from .core.config import Theme
+from .core.models import UserSession
 from .network.client import Client
-from .ui.login_window import LoginWindow
-from .ui.chat_window  import ChatWindow
+from .ui.chat_window_network import ChatWindow
+from .ui.login_window_network import LoginWindow
 
 
 class App:

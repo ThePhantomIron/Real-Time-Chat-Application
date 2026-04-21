@@ -4,12 +4,15 @@ import os
 
 
 class Config:
-    HOST = "127.0.0.1"
+    DEFAULT_SERVER_HOST = "127.0.0.1"
+    SERVER_BIND_HOST = "0.0.0.0"
     PORT = 9090
     BUFFER = 4096
     MAX_MSG = 500
     HISTORY_LOAD = 50
-    DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "chat.db")
+    DB_PATH = os.path.normpath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "chat.db")
+    )
     DEFAULT_CHANNELS = ["general", "random", "announcements", "off-topic"]
 
 

@@ -8,7 +8,7 @@ import threading
 from typing import Callable
 
 from ..core.config import Config
-from .protocol     import MF
+from .protocol import MF
 
 
 class Client:
@@ -27,18 +27,28 @@ class Client:
         on_msg:   Callable[[dict], None],
         on_err:   Callable[[str],  None],
     ):
-        self.username  = username
-        self._on_msg   = on_msg
-        self._on_err   = on_err
-        self._sock     = None
+        self.username = username
+        self.server_host = Config.DEFAULT_SERVER_HOST
+        self.server_port = Config.PORT
+        self._on_msg = on_msg
+        self._on_err = on_err
+        self._sock = None
         self.connected = False
 
     # ── Connection ───────────────────────────────────────────────────────────
 
-    def connect(self, mode: str, password: str) -> bool:
+    def connect(
+        self,
+        mode: str,
+        password: str,
+        host: str | None = None,
+        port: int | None = None,
+    ) -> bool:
+        self.server_host = (host or Config.DEFAULT_SERVER_HOST).strip()
+        self.server_port = port or Config.PORT
         try:
             self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self._sock.connect((Config.HOST, Config.PORT))
+            self._sock.connect((self.server_host, self.server_port))
             self._sock.sendall(
                 json.dumps(
                     {"mode": mode, "username": self.username, "password": password}
@@ -47,8 +57,8 @@ class Client:
             self.connected = True
             threading.Thread(target=self._recv_loop, daemon=True).start()
             return True
-        except Exception as e:
-            self._on_err(str(e))
+        except Exception as exc:
+            self._on_err(str(exc))
             return False
 
     def disconnect(self):
@@ -111,8 +121,8 @@ class Client:
                     break
                 buf += chunk
                 msgs, buf = MF.unpack(buf)
-                for m in msgs:
-                    self._on_msg(m)
+                for msg in msgs:
+                    self._on_msg(msg)
             except Exception:
                 break
         self.connected = False
