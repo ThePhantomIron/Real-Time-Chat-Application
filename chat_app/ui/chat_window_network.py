@@ -19,6 +19,7 @@ class ChatWindow(BaseWindow):
         self._client = client
         self._on_logout = on_logout
         self._closing = False
+        self._startup_buffer = []
         self._cm = None
         self._sidebar = None
         self._canvas = None
@@ -43,13 +44,16 @@ class ChatWindow(BaseWindow):
             while not buf_q.empty():
                 try:
                     msg = buf_q.get_nowait()
-                    self._queue_ui(lambda queued=msg: self._handle(queued))
+                    self._startup_buffer.append(msg)
                 except Exception:
                     break
 
         super().__init__(root, f"Chat - {session.name}", 900, 660)
         root.minsize(680, 480)
         root.protocol("WM_DELETE_WINDOW", self._close)
+        for msg in self._startup_buffer:
+            self._queue_ui(lambda queued=msg: self._handle(queued))
+        self._startup_buffer.clear()
 
     def _build(self):
         self._topbar()
