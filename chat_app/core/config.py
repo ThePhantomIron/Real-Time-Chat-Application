@@ -7,7 +7,10 @@ class Config:
     DEFAULT_SERVER_HOST = "127.0.0.1"
     SERVER_BIND_HOST = "0.0.0.0"
     PORT = 9090
+    DISCOVERY_PORT = 9091
     BUFFER = 4096
+    CONNECT_TIMEOUT = 3.0
+    DISCOVERY_TIMEOUT = 1.5
     MAX_MSG = 500
     HISTORY_LOAD = 50
     DB_PATH = os.path.normpath(

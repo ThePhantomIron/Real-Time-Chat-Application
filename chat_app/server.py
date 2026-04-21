@@ -32,6 +32,7 @@ class Server:
         self._clients: dict[socket.socket, str] = {}
         self._lock = threading.Lock()
         self._sock = None
+        self._discovery_sock = None
         self._up = False
 
     @property
@@ -47,9 +48,13 @@ class Server:
             self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self._sock.bind((self.host, self.port))
             self._sock.listen(20)
+            self._discovery_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self._discovery_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self._discovery_sock.bind((self.host, Config.DISCOVERY_PORT))
             self._up = True
             self.last_error = ""
             threading.Thread(target=self._accept_loop, daemon=True).start()
+            threading.Thread(target=self._discovery_loop, daemon=True).start()
             return True
         except Exception as exc:
             self.last_error = str(exc)
@@ -68,6 +73,36 @@ class Server:
                 self._sock.close()
             except Exception:
                 pass
+        if self._discovery_sock:
+            try:
+                self._discovery_sock.close()
+            except Exception:
+                pass
+
+    def _discovery_loop(self):
+        while self._up:
+            try:
+                payload, addr = self._discovery_sock.recvfrom(Config.BUFFER)
+                data = json.loads(payload.decode().strip())
+                if data.get("type") != "discover":
+                    continue
+                wanted_name = data.get("server_name", "").strip().casefold()
+                if wanted_name != self.server_name.casefold():
+                    continue
+                self._discovery_sock.sendto(
+                    json.dumps(
+                        {
+                            "type": "discover_ok",
+                            "server_name": self.server_name,
+                            "port": self.port,
+                        }
+                    ).encode(),
+                    addr,
+                )
+            except Exception:
+                if self._up:
+                    continue
+                break
 
     # ── Accept loop ──────────────────────────────────────────────────────────
 

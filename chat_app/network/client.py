@@ -3,6 +3,7 @@ client.py — TCP socket client that connects to the chat server.
 """
 
 import json
+import ipaddress
 import socket
 import threading
 from typing import Callable
@@ -45,24 +46,41 @@ class Client:
         port: int | None = None,
         server_password: str = "",
     ) -> bool:
-        self.server_host = (host or Config.DEFAULT_SERVER_HOST).strip()
+        requested_host = (host or Config.DEFAULT_SERVER_HOST).strip()
+        self.server_host = requested_host
         self.server_port = port or Config.PORT
+        payload = json.dumps(
+            {
+                "mode": mode,
+                "username": self.username,
+                "password": password,
+                "server_password": server_password,
+            }
+        ).encode()
+
+        hosts_to_try = [requested_host]
+        discovered_host = self._discover_server(requested_host)
+        if discovered_host and discovered_host not in hosts_to_try:
+            hosts_to_try.append(discovered_host)
+
         try:
-            self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self._sock.connect((self.server_host, self.server_port))
-            self._sock.sendall(
-                json.dumps(
-                    {
-                        "mode": mode,
-                        "username": self.username,
-                        "password": password,
-                        "server_password": server_password,
-                    }
-                ).encode()
-            )
-            self.connected = True
-            threading.Thread(target=self._recv_loop, daemon=True).start()
-            return True
+            last_error = None
+            for candidate in hosts_to_try:
+                try:
+                    sock = socket.create_connection(
+                        (candidate, self.server_port),
+                        timeout=Config.CONNECT_TIMEOUT,
+                    )
+                    sock.settimeout(None)
+                    sock.sendall(payload)
+                    self._sock = sock
+                    self.server_host = candidate
+                    self.connected = True
+                    threading.Thread(target=self._recv_loop, daemon=True).start()
+                    return True
+                except Exception as exc:
+                    last_error = exc
+            raise last_error or ConnectionError("Unable to connect.")
         except Exception as exc:
             self._on_err(str(exc))
             return False
@@ -115,6 +133,41 @@ class Client:
             self._sock.sendall(MF.pack(data))
         except Exception:
             pass
+
+    def _discover_server(self, server_name: str) -> str | None:
+        server_name = server_name.strip()
+        if not server_name or self._looks_like_host(server_name):
+            return None
+
+        payload = json.dumps(
+            {"type": "discover", "server_name": server_name}
+        ).encode()
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                sock.settimeout(Config.DISCOVERY_TIMEOUT)
+                sock.sendto(payload, ("255.255.255.255", Config.DISCOVERY_PORT))
+                while True:
+                    data, addr = sock.recvfrom(Config.BUFFER)
+                    response = json.loads(data.decode().strip())
+                    if response.get("type") != "discover_ok":
+                        continue
+                    if response.get("server_name", "").strip().casefold() != server_name.casefold():
+                        continue
+                    return addr[0]
+        except Exception:
+            return None
+
+    def _looks_like_host(self, value: str) -> bool:
+        lowered = value.casefold()
+        if lowered in {"localhost", Config.DEFAULT_SERVER_HOST.casefold()}:
+            return True
+        try:
+            ipaddress.ip_address(value)
+            return True
+        except ValueError:
+            pass
+        return "." in value or ":" in value
 
     # ── Receive loop ─────────────────────────────────────────────────────────
 

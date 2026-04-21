@@ -336,13 +336,13 @@ class LoginWindow(BaseWindow):
                 text=(
                     f"This PC will host on port {Config.PORT}.\n"
                     f"Server name: {self._server_name_var.get().strip() or get_default_server_name()}\n"
-                    f"Other PCs can join using this PC name or IP: {local_ip}"
+                    f"Other PCs can join using this server name, this PC name, or IP: {local_ip}"
                 ),
                 fg=Theme.ACCENT,
             )
         else:
             self._server_lbl.config(
-                text="Enter the host PC name or IP, plus the shared server password.",
+                text="Enter the server name, host PC name, or IP, plus the shared server password.",
                 fg=Theme.MUTED,
             )
 
