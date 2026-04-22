@@ -69,6 +69,8 @@ class LoginWindow(BaseWindow):
 
     def __init__(self, root: tk.Tk, on_login: Callable):
         self._on_login = on_login
+        self._alive = True
+        self._return_bind_id = None
         self._mode = tk.StringVar(value="login")
         self._user_var = tk.StringVar()
         self._pw_var = tk.StringVar()
@@ -87,8 +89,43 @@ class LoginWindow(BaseWindow):
         self._tab_reg = None
         self._si = 0
         super().__init__(root, "Chat - Sign In", 420, 680, resizable=False)
-        root.bind("<Return>", lambda _: self._submit())
+        self._return_bind_id = root.bind("<Return>", self._on_return)
         self._server_name_var.trace_add("write", lambda *_: self._refresh_host_details())
+
+    def _on_return(self, _event=None):
+        self._submit()
+
+    @staticmethod
+    def _widget_exists(widget) -> bool:
+        if widget is None:
+            return False
+        try:
+            return bool(widget.winfo_exists())
+        except tk.TclError:
+            return False
+
+    def _view_alive(self) -> bool:
+        return self._alive and self._widget_exists(self._status_lbl)
+
+    def _queue_ui(self, callback):
+        if not self._widget_exists(self.root):
+            return
+        try:
+            self.root.after(0, callback)
+        except tk.TclError:
+            pass
+
+    def _teardown(self):
+        if not self._alive:
+            return
+        self._alive = False
+        if self._return_bind_id and self._widget_exists(self.root):
+            try:
+                self.root.unbind("<Return>", self._return_bind_id)
+            except tk.TclError:
+                pass
+            self._return_bind_id = None
+        self._stop_spin()
 
     def _build(self):
         hero = tk.Frame(self.root, bg=Theme.BG_DARK)
@@ -326,7 +363,7 @@ class LoginWindow(BaseWindow):
         )
 
     def _refresh_host_details(self):
-        if not self._server_lbl:
+        if not self._widget_exists(self._server_lbl):
             return
         if self._host_local_var.get():
             if not self._server_name_var.get().strip():
@@ -347,6 +384,8 @@ class LoginWindow(BaseWindow):
             )
 
     def _submit(self):
+        if not self._view_alive():
+            return
         user = self._user_var.get().strip()
         password = self._pw_var.get()
         mode = self._mode.get()
@@ -374,7 +413,7 @@ class LoginWindow(BaseWindow):
             if self._host_local_var.get():
                 ok, reason = ensure_local_server(server_name, server_password)
                 if not ok:
-                    self.root.after(0, lambda r=reason: self._fail(r))
+                    self._queue_ui(lambda r=reason: self._fail(r))
                     return
 
             auth_q = queue.Queue()
@@ -401,11 +440,10 @@ class LoginWindow(BaseWindow):
                 host=connect_host,
                 server_password=server_password,
             ):
-                self.root.after(
-                    0,
+                self._queue_ui(
                     lambda: self._fail(
                         f"Cannot reach server at {connect_host}:{Config.PORT}."
-                    ),
+                    )
                 )
                 return
 
@@ -413,7 +451,7 @@ class LoginWindow(BaseWindow):
                 msg = auth_q.get(timeout=6)
             except Exception:
                 client.disconnect()
-                self.root.after(0, lambda: self._fail("Server did not respond."))
+                self._queue_ui(lambda: self._fail("Server did not respond."))
                 return
 
             if msg.get("type") == "auth_ok":
@@ -421,47 +459,49 @@ class LoginWindow(BaseWindow):
                     init_msg = init_q.get(timeout=6)
                 except Exception:
                     client.disconnect()
-                    self.root.after(
-                        0,
-                        lambda: self._fail("Server did not send initial chat state."),
+                    self._queue_ui(
+                        lambda: self._fail("Server did not send initial chat state.")
                     )
                     return
 
                 if init_msg.get("type") == "disconnect":
                     client.disconnect()
-                    self.root.after(
-                        0,
+                    self._queue_ui(
                         lambda r=init_msg.get(
                             "reason",
                             "Disconnected before chat state loaded.",
-                        ): self._fail(r),
+                        ): self._fail(r)
                     )
                     return
 
                 canonical = msg["username"]
-                self.root.after(
-                    0,
-                    lambda c=canonical, cl=client: self._success(c, cl),
-                )
+                self._queue_ui(lambda c=canonical, cl=client: self._success(c, cl))
             else:
                 reason = msg.get("reason", "Authentication failed.")
                 client.disconnect()
-                self.root.after(0, lambda r=reason: self._fail(r))
+                self._queue_ui(lambda r=reason: self._fail(r))
 
         threading.Thread(target=work, daemon=True).start()
 
     def _success(self, canonical: str, client: Client):
+        if not self._view_alive():
+            return
         self._stop_spin()
         self._set_status(
             f"Connected to {client.server_host}:{client.server_port} as {canonical}.",
             Theme.ONLINE,
         )
+        self._teardown()
         self._on_login(UserSession(canonical), client)
 
     def _fail(self, reason: str):
+        if not self._view_alive():
+            return
         self._stop_spin()
-        self._btn.config(state="normal")
-        self._alt_btn.config(state="normal")
+        if self._widget_exists(self._btn):
+            self._btn.config(state="normal")
+        if self._widget_exists(self._alt_btn):
+            self._alt_btn.config(state="normal")
         self._set_status(reason, Theme.DANGER)
 
     def _start_spin(self):
@@ -469,18 +509,27 @@ class LoginWindow(BaseWindow):
         self._tick()
 
     def _tick(self):
-        if self._spinner:
+        if not self._view_alive():
+            self._spin_job = None
+            return
+        if self._widget_exists(self._spinner):
             self._spinner.config(text=self._SPINNER[self._si % len(self._SPINNER)])
         self._si += 1
-        self._spin_job = self.root.after(150, self._tick)
+        try:
+            self._spin_job = self.root.after(150, self._tick)
+        except tk.TclError:
+            self._spin_job = None
 
     def _stop_spin(self):
         if self._spin_job:
-            self.root.after_cancel(self._spin_job)
+            try:
+                self.root.after_cancel(self._spin_job)
+            except tk.TclError:
+                pass
             self._spin_job = None
-        if self._spinner:
+        if self._widget_exists(self._spinner):
             self._spinner.config(text="")
 
     def _set_status(self, text: str, color: str):
-        if self._status_lbl:
+        if self._widget_exists(self._status_lbl):
             self._status_lbl.config(text=text, fg=color)

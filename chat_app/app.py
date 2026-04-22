@@ -39,5 +39,6 @@ class App:
         self._show_login()
 
     def _clear(self):
+        self._root.unbind("<Return>")
         for widget in self._root.winfo_children():
             widget.destroy()
